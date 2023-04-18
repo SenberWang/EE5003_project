@@ -1,0 +1,14 @@
+#-----------------------------------------------------------
+# Vivado v2019.2 (64-bit)
+# SW Build 2708876 on Wed Nov  6 21:40:23 MST 2019
+# IP Build 2700528 on Thu Nov  7 00:09:20 MST 2019
+# Start of session at: Sun Oct 16 21:22:40 2022
+# Process ID: 14856
+# Current directory: E:/EE5003/hardware/hls_project/ultrascale_cnn_v1/ultrascale_v33
+# Command line: vivado.exe -gui_launcher_event rodinguilauncherevent10292 E:\EE5003\hardware\hls_project\ultrascale_cnn_v1\ultrascale_v33\ultrascale_v33.xpr
+# Log file: E:/EE5003/hardware/hls_project/ultrascale_cnn_v1/ultrascale_v33/vivado.log
+# Journal file: E:/EE5003/hardware/hls_project/ultrascale_cnn_v1/ultrascale_v33\vivado.jou
+#-----------------------------------------------------------
+start_gui
+open_project E:/EE5003/hardware/hls_project/ultrascale_cnn_v1/ultrascale_v33/ultrascale_v33.xpr
+update_compile_order -fileset sources_1
