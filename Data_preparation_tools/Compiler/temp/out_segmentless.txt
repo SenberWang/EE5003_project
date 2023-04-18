@@ -1,0 +1,88 @@
+mov <timestep> #1 
+mov <_timestep> #1 #0011 
+mov <_threshold> d1 #0011 
+lft <_threshold> <_threshold> d22 #0011 
+mov <max_timestep> d41 
+mov <input_addr> #0 
+rdi <spike_id> <input_addr> 
+rft <spike_timestep> <spike_id> d24 
+and0 <spike_timestep> <spike_timestep> #0000_0000_1111_1111 
+and1 <spike_timestep> <spike_timestep> #0000_0000_0000_0000 
+and2 <spike_timestep> <spike_timestep> #0000_0000_0000_0000 
+and3 <spike_timestep> <spike_timestep> #0000_0000_0000_0000 
+je <timestep> <spike_timestep> !L5_handle_init 
+mov <_addr> #0 #0011 
+rpm <_potential> <_addr> #0011 
+lft <_reg1_cct> <_timestep> d24 #0011 
+and0 <_reg1_cct> <_reg1_cct> #0000_0000_0000_0000 #0011 
+and1 <_reg1_cct> <_reg1_cct> #0011_1111_0000_0000 #0011 
+and2 <_reg1_cct> <_reg1_cct> #0000_0000_0000_0000 #0011 
+and3 <_reg1_cct> <_reg1_cct> #0000_0000_0000_0000 #0011 
+rft <_reg2_cct> <_potential> d32 #0011 
+and1 <_reg2_cct> <_reg2_cct> #0000_0000_1111_1111 #0011 
+and2 <_reg2_cct> <_reg2_cct> #0000_0000_0000_0000 #0011 
+and3 <_reg2_cct> <_reg2_cct> #0000_0000_0000_0000 #0011 
+add <_out_spike_id> <_reg1_cct> <_reg2_cct> #0011 
+asgs <_potential_v> <_potential> d31 d0 #0011 
+opt <_potential_v> <_threshold> <_out_spike_id> #1000_0000_0000_0000 #0011 
+rft <_potential_id> <_potential> d32 #0011 
+and2 <_potential_id> <_potential_id> #0000_0000_0000_0000 #0011 
+and3 <_potential_id> <_potential_id> #0000_0000_0000_0000 #0011 
+lft <_reg1_cct> <_potential_id> d32 #0011 
+and0 <_reg1_cct> <_reg1_cct> #0000_0000_0000_0000 #0011 
+and1 <_reg1_cct> <_reg1_cct> #0000_0000_0000_0000 #0011 
+and2 <_reg2_cct> <_potential_v> #0000_0000_0000_0000 #0011 
+and3 <_reg2_cct> <_reg2_cct> #0000_0000_0000_0000 #0011 
+add <_potential> <_reg1_cct> <_reg2_cct> #0011 
+wbp <_addr> <_potential> #0011 
+add <_addr> <_addr> d1 #0011 
+mov <cmp1> <_addr> #0011 
+jn <cmp1> d5 !L5_ckf 
+je <spike_timestep> <max_timestep> !endimg 
+add <timestep> <timestep> #1 
+add <_timestep> <_timestep> #1 #0011 
+syn 
+jmp !L5_read_timestep_init 
+add <input_addr> <input_addr> #1 
+mov <_spike_id> <spike_id> #0011 
+and0 <_src_col> <_spike_id> #0000_0000_0000_1111 #0011 
+and1 <_src_col> <_src_col> #0000_0000_0000_0000 #0011 
+and2 <_src_col> <_src_col> #0000_0000_0000_0000 #0011 
+and3 <_src_col> <_src_col> #0000_0000_0000_0000 #0011 
+rft <_src_row> <_spike_id> d4 #0011 
+and0 <_src_row> <_src_row> #0000_0000_0000_1111 #0011 
+and1 <_src_row> <_src_row> #0000_0000_0000_0000 #0011 
+and2 <_src_row> <_src_row> #0000_0000_0000_0000 #0011 
+and3 <_src_row> <_src_row> #0000_0000_0000_0000 #0011 
+rft <_src_fm> <_spike_id> d8 #0011 
+and0 <_src_fm> <_src_fm> #0000_0000_0111_1111 #0011 
+and1 <_src_fm> <_src_fm> #0000_0000_0000_0000 #0011 
+and2 <_src_fm> <_src_fm> #0000_0000_0000_0000 #0011 
+and3 <_src_fm> <_src_fm> #0000_0000_0000_0000 #0011 
+mov <_addr> #0 #0011 
+rpm <_potential> <_addr> #0011 
+asgs <_potential_v> <_potential> d31 d0 #0011 
+rft <_potential_id> <_potential> d32 #0011 
+and2 <_potential_id> <_potential_id> #0000_0000_0000_0000 #0011 
+and3 <_potential_id> <_potential_id> #0000_0000_0000_0000 #0011 
+mul <_kernel_addr> <_src_fm> d16 #0011 
+mul <_temp> <_src_col> d4 #0011 
+add <_kernel_addr> <_kernel_addr> <_temp> #0011 
+add <_kernel_addr> <_kernel_addr> <_src_row> #0011 
+mul <_temp> <_addr> d1024 #0011 
+add <_kernel_addr> <_kernel_addr> <_temp> #0011 
+rwm <_weight> <_kernel_addr> #0011 
+adds <_potential_v> <_potential_v> <_weight> #0011 
+lft <_reg1_cct> <_potential_id> d32 #0011 
+and0 <_reg1_cct> <_reg1_cct> #0000_0000_0000_0000 #0011 
+and1 <_reg1_cct> <_reg1_cct> #0000_0000_0000_0000 #0011 
+and2 <_reg2_cct> <_potential_v> #0000_0000_0000_0000 #0011 
+and3 <_reg2_cct> <_reg2_cct> #0000_0000_0000_0000 #0011 
+add <_potential> <_reg1_cct> <_reg2_cct> #0011 
+wbp <_addr> <_potential> #0011 
+add <_addr> <_addr> d1 #0011 
+mov <cmp1> <_addr> #0011 
+jn <cmp1> d5 !L5_handle 
+jmp !L5_input_read 
+syn 
+done 
