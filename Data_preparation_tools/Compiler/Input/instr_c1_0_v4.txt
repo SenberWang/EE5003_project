@@ -1,0 +1,278 @@
+SET REG[0] cluster_id
+SET REG[1] timestep
+SET REG[2] spike_id
+SET REG[3] input_addr
+SET REG[4] cmp0         // for comparison operations
+SET REG[5] cmp1         // for comparison operations
+SET REG[6] max_timestep
+
+SET PE_REG[0] _cluster_id
+SET PE_REG[1] _pe_id
+SET PE_REG[2] _timestep
+SET PE_REG[3] _threshold
+SET PE_REG[4] _row
+SET PE_REG[5] _col
+SET PE_REG[6] _addr
+SET PE_REG[7] _potential
+SET PE_REG[8] _potential_v
+SET PE_REG[9] _weight
+SET PE_REG[10] _out_spike_id
+SET PE_REG[11] _kernel_row
+SET PE_REG[12] _kernel_col
+SET PE_REG[13] _kernel_addr
+SET PE_REG[14] _src_row
+SET PE_REG[15] _src_col
+SET PE_REG[16] _feature_map
+SET PE_REG[17] _spike_id
+SET PE_REG[18] _spike_timestep
+SET PE_REG[19] _spike_src_id
+SET PE_REG[20] _spike_out_temp
+SET PE_REG[21] _max_row
+SET PE_REG[22] _max_col
+SET PE_REG[23] _potential_id
+SET PE_REG[24] _reg1_cct
+SET PE_REG[25] _reg2_cct
+SET PE_REG[26] _fm_num
+SET PE_REG[27] _fm_offset
+SET PE_REG[27] _ckf_num
+
+
+L1_init:                    mov <timestep>, #1                                              // timestep <= 0
+                            mov <_timestep>, #1, #1111                                      // _timestep <= 0
+                            mov <max_timestep>, d41                                         // max_timestep <= 41
+                            mov <_threshold>, #1, #1111                                     // _threshold <= 1
+                            lft <_threshold>, <_threshold>, d22, #1111                      // _threshold <= (1<<22) = 2^22
+                            mov <input_addr>, #0                                            // input_addr <= 0
+                            mov <_feature_map>, #0, #0001                                   // _feature_map in [0, 12]
+L1_input_read:              rdi <spike_id>, <input_addr>                                    // spike_id <= input_mem[input_addr]
+                            mov <_spike_id>, <spike_id>, #1111                              // _spike_id <= spike_id
+                            //sgs <_spike_timestep>, <_spike_id>, d31, d24, #1111             // _spike_timestep <= _spike_id[31:23]
+                            rft <_spike_timestep>, <_spike_id>, d24, #1111
+                            and0 <_spike_timestep>, <_spike_timestep>, #0000_0000_1111_1111, #1111
+                            and1 <_spike_timestep>, <_spike_timestep>, #0000_0000_0000_0000, #1111
+                            and2 <_spike_timestep>, <_spike_timestep>, #0000_0000_0000_0000, #1111
+                            and3 <_spike_timestep>, <_spike_timestep>, #0000_0000_0000_0000, #1111
+                            //sgs <_spike_src_id>, <_spike_id>, d23, d0, #1111                // _spike_src_id <= _spike_id[23:0]
+                            and1 <_spike_src_id>, <_spike_id>, #0000_0000_1111_1111, #1111
+                            and2 <_spike_src_id>, <_spike_src_id>, #0000_0000_0000_0000, #1111
+                            and3 <_spike_src_id>, <_spike_src_id>, #0000_0000_0000_0000, #1111
+                            mov <cmp0>, <_spike_timestep>, #0001                            // cmp0 <= _spike_timestep
+                            je  <timestep>, <cmp0>, !L1_handle_init                         // if cmp0 == current timestep: jump to L1_handle_init to update target potential
+                            mov <_fm_num>, #0, #1111
+L1_ckf_init:                mov <_ckf_num>, d0, #1111
+                            mul <_addr>, <_fm_num>, d576, #1111
+L1_ckf_handle:              rpm <_potential>, <_addr>, #1111                                // _potential <= potential_mem[_addr]
+                            //cct <_out_spike_id>, <_timestep>, <_potential>, d7, d0, d55, d32, #1111         // _out_spike_id <= {timestep[7:0], _addr[15:0]}
+                            lft <_reg1_cct>, <_timestep>, d24, #1111
+                            and0 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and1 <_reg1_cct>, <_reg1_cct>, #1111_1111_0000_0000, #1111
+                            and2 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and3 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            rft <_reg2_cct>, <_potential>, d32, #1111
+                            and1 <_reg2_cct>, <_reg2_cct>, #0000_0000_1111_1111, #1111
+                            and2 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #1111
+                            and3 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #1111
+                            add <_out_spike_id>, <_reg1_cct>, <_reg2_cct>, #1111
+                            //end of cct
+                            and1 <_out_spike_id>, <_out_spike_id>, #0000_1111_1111_1111, #1111              // _out_spike_id[31:28] <= 4'b0
+                            asgs  <_potential_v>, <_potential>, d31, d0, #1111
+                            opt <_potential_v>, <_threshold>, <_out_spike_id>, #0000_0000_0000_0010, #1111    // if _potential[31:0] >= _threshold: write {_cluster_mask[15:00], _out_spike_id[31:00]} to output FIFO, reset _potential[31:00] to 0
+                            //sgs  <_potential_id>, <_potential>, d63, d32, #1111
+                            rft <_potential_id>, <_potential>, d32, #1111
+                            and2 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                            and3 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                            //cct  <_potential>, <_potential_id>, <_potential_v>, d31, d0, d31, d0, #1111
+                            lft <_reg1_cct>, <_potential_id>, d32, #1111
+                            and0 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and1 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and2 <_reg2_cct>, <_potential_v>, #0000_0000_0000_0000, #1111
+                            and3 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #1111
+                            add <_potential>, <_reg1_cct>, <_reg2_cct>, #1111
+                            wbp <_addr>, <_potential>, #1111                                // write back, potential_mem[_addr] <= _potential
+                            add <_addr>, <_addr>, d1, #1111
+                            add <_ckf_num>, <_ckf_num>, d1, #1111
+                            mov <cmp0>, <_ckf_num>, #1111
+                            jn <cmp0>, d576, !L1_ckf_handle
+                            add <_fm_num>, <_fm_num>, d1, #1111
+                            mov <cmp0>, <_fm_num>, #1111
+                            jn <cmp0>, d3, !L1_ckf_init
+                            mov <cmp0>, <_spike_timestep>, #1111                            // cmp0 <= _spike_timestep
+                            je <cmp0>, <max_timestep>, !endimg                              // if cmp0 == max_timestep, jump to endimg
+                            jmp !L1_sync                                                    // else, synchornize for the next timestep (can omit)
+L1_sync:                    add <timestep>, <timestep>, #1                                  // timestep += 1
+                            add <_timestep>, <_timestep>, #1, #1111                         // _timestep += 1
+                            syn                                                             // synchornize
+                            jmp !L1_input_read                                              // jump to L1_input_read to read the next input
+L1_handle_init:             add <input_addr>, <input_addr>, #1                              // input_addr += 1
+                            //sgs <_src_col>, <_spike_id>, d4, d0, #1111                      // _src_col <= _spike_id[4:0]
+                            and0 <_src_col>, <_spike_id>, #0000_0000_0001_1111, #1111
+                            and1 <_src_col>, <_src_col>, #0000_0000_0000_0000, #1111
+                            and2 <_src_col>, <_src_col>, #0000_0000_0000_0000, #1111
+                            and3 <_src_col>, <_src_col>, #0000_0000_0000_0000, #1111
+                            //sgs <_src_row>, <_spike_id>, d9, d5, #1111                      // _src_row <= _spike_id[4:0]
+                            rft <_src_row>, <_spike_id>, d5, #1111
+                            and0 <_src_row>, <_src_row>, #0000_0000_0001_1111, #1111
+                            and1 <_src_row>, <_src_row>, #0000_0000_0000_0000, #1111
+                            and2 <_src_row>, <_src_row>, #0000_0000_0000_0000, #1111
+                            and3 <_src_row>, <_src_row>, #0000_0000_0000_0000, #1111
+L1_handle_first_fm:         mov <cmp0>, <_src_row>, #0001                                   // cmp0 <= _row
+                            sub <_row>, <_src_row>, d4, #1111                               // _row <= _src_row - 4 (affected rows are [_src_row - 4, _src_row])
+                            jg  <cmp0>, d4, !L1_handle_row_max
+                            mov <_row>, d0, #1111                                           // else: _row <= 0
+L1_handle_row_max:          mov <cmp0>, <_src_row>, #0001
+                            jng <cmp0>, d23, !L1_handle_col_max                             // if cmp0 <= 23: jump to L1_handle_row_init
+                            mov <_max_row>, d23, #1111                                      // else: _row <= 0
+                            jmp !L1_handle_col_max                                          // jump to L1_handle_row_init (can omit)
+L1_handle_col_max:          mov <_max_row>, <_src_row>, #1111
+                            mov <cmp0>, <_src_col>, #0001
+                            mov <_max_col>, <_src_col>, #1111
+                            jng <cmp0>, d23, !L1_handle_col_min                            // if cmp0 <= 23: jump to L1_handle_row
+                            mov <_max_col>, d23, #1111                                      // else: _row <= 0
+L1_handle_col_min:          sub <_col>, <_src_col>, d4, #1111                               // _col <= _src_col - 4 (affected cols are [_src_col - 4, _src_col])
+                            mov <cmp0>, <_src_col>, #0001                                       // cmp0 <= _col
+                            jg  <cmp0>, d4, !L1_handle_kernel_row_init                              // if cmp0 >= 0: jump to L1_handle_col_max
+                            mov <_col>, d0, #1111                                           // else: _col <= 0
+                            jmp !L1_handle_kernel_row_init                                  // jump to L1_handle_row (can omit)
+L1_handle_kernel_row_init:  sub <_kernel_row>, <_src_row>, <_row>, #1111                    // _kernel_row <= _src_row - _row
+L1_handle_row:              sub <_kernel_col>, <_src_col>, <_col>, #1111                    // _kernel_col <= _src_col - _col
+                            mul <_addr>, <_row>, d24, #1111                                 // _addr <= row * 24
+                            add <_addr>, <_addr>, <_col>, #1111                             // _addr <= _addr + _col
+                            rpm <_potential>, <_addr>, #1111                                // _potential <= potential_mem[_addr]
+                            asgs <_potential_v>, <_potential>, d31, d0, #1111               // _potential_v <= _potential[31:0] signed extending
+                            //sgs <_potential_id>, <_potential>, d45, d32, #1111
+                            rft <_potential_id>, <_potential>, d32, #1111
+                            and0 <_potential_id>, <_potential_id>, #0011_1111_1111_1111, #1111
+                            and1 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                            and2 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                            and3 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                            mul <_kernel_addr>, <_kernel_row>, d5, #1111                    // _kernel_addr <= _kernel_row * 5
+                            add <_kernel_addr>, <_kernel_addr>, <_kernel_col>, #1111        // _kernel_addr <= _kernel_addr + _kernel_col
+                            rwm <_weight>, <_kernel_addr>, #1111                            // _weight <= weight_mem[_kernel_addr]  
+                            adds <_potential_v>, <_potential_v>, <_weight>, #1111           // _potential_v <= _potential_v + _weight
+                            //cct  <_potential>, <_potential_id>, <_potential_v>, d16, d0, d31, d0, #1111       // _potential <= {_addr[16:0], potential_v[31:0]}
+                            lft <_reg1_cct>, <_potential_id>, d32, #1111
+                            and0 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and1 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and3 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and2 <_reg2_cct>, <_potential_v>, #0000_0000_0000_0000, #1111
+                            and3 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #1111
+                            add <_potential>, <_reg1_cct>, <_reg2_cct>, #1111
+                            wbp <_addr>, <_potential>, #1111                                // write back, potential_mem[_addr] <= _potential
+                            add <_col>, <_col>, #1, #1111                                   // _col += 1
+                            mov <cmp0>, <_col>, #0001                                       // cmp0 <= _col                        
+                            mov <cmp1>, <_max_col>, #0001                                   // cmp1 <= _max_col                        
+                            jng <cmp0>, <cmp1>, !L1_handle_row                              // if cmp0 <= cmp1: jump to L1_handle_row to continue handling this row
+                            add <_row>, <_row>, d1, #1111                                   // else _row += 1
+                            mov <cmp0>, <_row>, #0001                                       // cmp0 <= _row                         
+                            mov <cmp1>, <_max_row>, #0001                                   // cmp1 <= _max_row                        
+                            jng <cmp0>, <cmp1>, !L1_handle_col_min                          // if cmp0 <= cmp1: jump to L1_handle_row_init to handle the next row
+L1_handle_second_fm:        mov <cmp0>, <_src_row>, #0001                                   // cmp0 <= _row
+                            sub <_row>, <_src_row>, d4, #1111                               // _row <= _src_row - 4 (affected rows are [_src_row - 4, _src_row])
+                            jg  <cmp0>, d4, !L1_handle_row_max_nd
+                            mov <_row>, d0, #1111                                           // else: _row <= 0
+L1_handle_row_max_nd:       mov <cmp0>, <_src_row>, #0001
+                            jng <cmp0>, d23, !L1_handle_col_max_nd                          // if cmp0 <= 23: jump to L1_handle_row_init
+                            mov <_max_row>, d23, #1111                                      // else: _row <= 0
+                            jmp !L1_handle_col_max_nd                                       // jump to L1_handle_row_init (can omit)
+L1_handle_col_max_nd:       mov <_max_row>, <_src_row>, #1111
+                            mov <cmp0>, <_src_col>, #0001
+                            mov <_max_col>, <_src_col>, #1111
+                            jng <cmp0>, d23, !L1_handle_col_min_nd                          // if cmp0 <= 23: jump to L1_handle_row
+                            mov <_max_col>, d23, #1111                                      // else: _row <= 0
+L1_handle_col_min_nd:       sub <_col>, <_src_col>, d4, #1111                               // _col <= _src_col - 4 (affected cols are [_src_col - 4, _src_col])
+                            mov <cmp0>, <_src_col>, #0001                                   // cmp0 <= _col
+                            jg  <cmp0>, d4, !L1_handle_kernel_row_init_nd                              // if cmp0 >= 0: jump to L1_handle_col_max
+                            mov <_col>, d0, #1111                                           // else: _col <= 0
+                            jmp !L1_handle_kernel_row_init_nd                               // jump to L1_handle_row (can omit)
+L1_handle_kernel_row_init_nd:  sub <_kernel_row>, <_src_row>, <_row>, #1111                 // _kernel_row <= _src_row - _row
+L1_handle_row_nd:           sub <_kernel_col>, <_src_col>, <_col>, #1111                    // _kernel_col <= _src_col - _col
+                            mul <_addr>, <_row>, d24, #1111                                 // _addr <= row * 24
+                            add <_addr>, <_addr>, <_col>, #1111                             // _addr <= _addr + _col
+                            add <_addr>, <_addr>, d576, #1111
+                            rpm <_potential>, <_addr>, #1111                                // _potential <= potential_mem[_addr]
+                            asgs <_potential_v>, <_potential>, d31, d0, #1111               // _potential_v <= _potential[31:0] signed extending
+                            //sgs <_potential_id>, <_potential>, d45, d32, #1111
+                            rft <_potential_id>, <_potential>, d32, #1111
+                            and0 <_potential_id>, <_potential_id>, #0011_1111_1111_1111, #1111
+                            and1 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                            and2 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                            and3 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                            mul <_kernel_addr>, <_kernel_row>, d5, #1111                    // _kernel_addr <= _kernel_row * 5
+                            add <_kernel_addr>, <_kernel_addr>, <_kernel_col>, #1111        // _kernel_addr <= _kernel_addr + _kernel_col
+                            add <_kernel_addr>, <_kernel_addr>, d25, #1111
+                            rwm <_weight>, <_kernel_addr>, #1111                            // _weight <= weight_mem[_kernel_addr]
+                            adds <_potential_v>, <_potential_v>, <_weight>, #1111           // _potential_v <= _potential_v + _weight
+                            //cct  <_potential>, <_potential_id>, <_potential_v>, d16, d0, d31, d0, #1111       // _potential <= {_addr[16:0], potential_v[31:0]}
+                            lft <_reg1_cct>, <_potential_id>, d32, #1111
+                            and0 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and1 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and3 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and2 <_reg2_cct>, <_potential_v>, #0000_0000_0000_0000, #1111
+                            and3 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #1111
+                            add <_potential>, <_reg1_cct>, <_reg2_cct>, #1111
+                            wbp <_addr>, <_potential>, #1111                                // write back, potential_mem[_addr] <= _potential
+                            add <_col>, <_col>, #1, #1111                                   // _col += 1
+                            mov <cmp0>, <_col>, #0001                                       // cmp0 <= _col
+                            mov <cmp1>, <_max_col>, #0001                                   // cmp1 <= _max_col
+                            jng <cmp0>, <cmp1>, !L1_handle_row_nd                           // if cmp0 <= cmp1: jump to L1_handle_row to continue handling this row
+                            add <_row>, <_row>, d1, #1111                                   // else _row += 1
+                            mov <cmp0>, <_row>, #0001                                       // cmp0 <= _row
+                            mov <cmp1>, <_max_row>, #0001                                   // cmp1 <= _max_row
+                            jng <cmp0>, <cmp1>, !L1_handle_col_min_nd                       // if cmp0 <= cmp1: jump to L1_handle_row_init to handle the next row
+L1_handle_third_fm:         mov <cmp0>, <_src_row>, #0001                                   // cmp0 <= _row
+                            sub <_row>, <_src_row>, d4, #1111                               // _row <= _src_row - 4 (affected rows are [_src_row - 4, _src_row])
+                            jg  <cmp0>, d4, !L1_handle_row_max_rd
+                            mov <_row>, d0, #1111                                           // else: _row <= 0
+L1_handle_row_max_rd:       mov <cmp0>, <_src_row>, #0001
+                            jng <cmp0>, d23, !L1_handle_col_max_rd                          // if cmp0 <= 23: jump to L1_handle_row_init
+                            mov <_max_row>, d23, #1111                                      // else: _row <= 0
+                            jmp !L1_handle_col_max_rd                                       // jump to L1_handle_row_init (can omit)
+L1_handle_col_max_rd:       mov <_max_row>, <_src_row>, #1111
+                            mov <cmp0>, <_src_col>, #0001
+                            mov <_max_col>, <_src_col>, #1111
+                            jng <cmp0>, d23, !L1_handle_col_min_rd                          // if cmp0 <= 23: jump to L1_handle_row
+                            mov <_max_col>, d23, #1111                                      // else: _row <= 0
+L1_handle_col_min_rd:       sub <_col>, <_src_col>, d4, #1111                               // _col <= _src_col - 4 (affected cols are [_src_col - 4, _src_col])
+                            mov <cmp0>, <_src_col>, #0001                                   // cmp0 <= _col
+                            jg  <cmp0>, d4, !L1_handle_kernel_row_init_rd                   // if cmp0 >= 0: jump to L1_handle_col_max
+                            mov <_col>, d0, #1111                                           // else: _col <= 0
+                            jmp !L1_handle_kernel_row_init_rd                               // jump to L1_handle_row (can omit)
+L1_handle_kernel_row_init_rd:  sub <_kernel_row>, <_src_row>, <_row>, #1111                 // _kernel_row <= _src_row - _row
+L1_handle_row_rd:           sub <_kernel_col>, <_src_col>, <_col>, #1111                    // _kernel_col <= _src_col - _col
+                            mul <_addr>, <_row>, d24, #1111                                 // _addr <= row * 24
+                            add <_addr>, <_addr>, <_col>, #1111                             // _addr <= _addr + _col
+                            add <_addr>, <_addr>, d1152, #1111
+                            rpm <_potential>, <_addr>, #1111                                // _potential <= potential_mem[_addr]
+                            asgs <_potential_v>, <_potential>, d31, d0, #1111               // _potential_v <= _potential[31:0] signed extending
+                            //sgs <_potential_id>, <_potential>, d45, d32, #1111
+                            rft <_potential_id>, <_potential>, d32, #1111
+                            and0 <_potential_id>, <_potential_id>, #0011_1111_1111_1111, #1111
+                            and1 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                            and2 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                            and3 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                            mul <_kernel_addr>, <_kernel_row>, d5, #1111                    // _kernel_addr <= _kernel_row * 5
+                            add <_kernel_addr>, <_kernel_addr>, <_kernel_col>, #1111        // _kernel_addr <= _kernel_addr + _kernel_col
+                            add <_kernel_addr>, <_kernel_addr>, d50, #1111
+                            rwm <_weight>, <_kernel_addr>, #1111                            // _weight <= weight_mem[_kernel_addr]
+                            adds <_potential_v>, <_potential_v>, <_weight>, #1111           // _potential_v <= _potential_v + _weight
+                            //cct  <_potential>, <_potential_id>, <_potential_v>, d16, d0, d31, d0, #1111       // _potential <= {_addr[16:0], potential_v[31:0]}
+                            lft <_reg1_cct>, <_potential_id>, d32, #1111
+                            and0 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and1 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and3 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                            and2 <_reg2_cct>, <_potential_v>, #0000_0000_0000_0000, #1111
+                            and3 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #1111
+                            add <_potential>, <_reg1_cct>, <_reg2_cct>, #1111
+                            wbp <_addr>, <_potential>, #1111                                // write back, potential_mem[_addr] <= _potential
+                            add <_col>, <_col>, #1, #1111                                   // _col += 1
+                            mov <cmp0>, <_col>, #0001                                       // cmp0 <= _col
+                            mov <cmp1>, <_max_col>, #0001                                   // cmp1 <= _max_col
+                            jng <cmp0>, <cmp1>, !L1_handle_row_rd                           // if cmp0 <= cmp1: jump to L1_handle_row to continue handling this row
+                            add <_row>, <_row>, d1, #1111                                   // else _row += 1
+                            mov <cmp0>, <_row>, #0001                                       // cmp0 <= _row
+                            mov <cmp1>, <_max_row>, #0001                                   // cmp1 <= _max_row
+                            jng <cmp0>, <cmp1>, !L1_handle_col_min_rd                       // if cmp0 <= cmp1: jump to L1_handle_row_init to handle the next row
+                            jmp !L1_input_read                                              // else: read the next input
+endimg:                     syn 
+                            syn 
+                            done

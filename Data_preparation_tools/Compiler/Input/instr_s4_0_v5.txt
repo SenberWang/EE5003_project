@@ -1,0 +1,208 @@
+SET REG[0] cluster_id
+SET REG[1] timestep
+SET REG[2] spike_id
+SET REG[3] input_addr
+SET REG[4] cmp0         // for comparison operations
+SET REG[5] col
+SET REG[6] row
+SET REG[7] feature_map
+SET REG[8] spike_timestep
+SET REG[9] spike_src_id
+SET REG[10] max_timestep
+
+SET PE_REG[0] _cluster_id
+SET PE_REG[1] _pe_id
+SET PE_REG[2] _timestep
+SET PE_REG[3] _threshold
+SET PE_REG[4] _row
+SET PE_REG[5] _col
+SET PE_REG[6] _addr
+SET PE_REG[7] _potential
+SET PE_REG[8] _potential_v
+SET PE_REG[9] _weight
+SET PE_REG[10] _out_spike_id
+SET PE_REG[11] _feature_map
+SET PE_REG[12] _potential_id
+SET PE_REG[13] _reg1_cct
+SET PE_REG[14] _reg2_cct
+
+
+L4_init:                                mov <timestep>, #1                                              // timestep <= 1
+                                        mov <_timestep>, #1, #1111                                      // _timestep <= 1
+                                        mov <_threshold>, d1, #1111                                     // _threshold <= 1
+                                        mov <max_timestep>, d41                                          // max_timestep <= 41
+                                        lft <_threshold>, <_threshold>, d2, #1111                       // _threshold <= (1<<22) = 2^22
+                                        mov <_weight>, #1, #1111                                        // _weight <= 1
+L4_read_timestep_init:                  mov <input_addr>, #0                                            // input_addr <= 0
+L4_input_read:                          rdi <spike_id>, <input_addr>                                    // spike_id <= input_mem[input_addr]
+                                        //sgs <spike_timestep>, <spike_id>, d31, d24                      // spike_timestep <= spike_id[31:24]
+                                        rft <spike_timestep>, <spike_id>, d24
+                                        and0 <spike_timestep>, <spike_timestep>, #0000_0000_1111_1111
+                                        and1 <spike_timestep>, <spike_timestep>, #0000_0000_0000_0000
+                                        and2 <spike_timestep>, <spike_timestep>, #0000_0000_0000_0000
+                                        and3 <spike_timestep>, <spike_timestep>, #0000_0000_0000_0000
+                                        je  <timestep>, <spike_timestep>, !L4_handle_init               // if spike_timestep == current timestep: jump to L4_handle_init to update target potential
+L4_ckf_init:                            mov <_addr>, #0, #1111                                          // _addr <= 0
+L4_ckf_handle:                          rpm <_potential>, <_addr>, #1111                                // _potential <= potential_mem[_addr]
+                                        //cct <_out_spike_id>, <_timestep>, <_potential>, d7, d0, d55, d32, #1111         // _out_spike_id <= {timestep[7:0], _addr[55:32]}
+                                        lft <_reg1_cct>, <_timestep>, d24, #1111
+                                        and0 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                                        and1 <_reg1_cct>, <_reg1_cct>, #1111_1111_0000_0000, #1111
+                                        and2 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                                        and3 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                                        rft <_reg2_cct>, <_potential>, d32, #1111
+                                        and1 <_reg2_cct>, <_reg2_cct>, #0000_0000_1111_1111, #1111
+                                        and2 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #1111
+                                        and3 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #1111
+                                        add <_out_spike_id>, <_reg1_cct>, <_reg2_cct>, #1111
+                                        asgs  <_potential_v>, <_potential>, d31, d0, #1111              // _potential_v <= _potential[31:0] signed extending
+                                        opt <_potential_v>, <_threshold>, <_out_spike_id>, #0000_0000_0010_0000, #1111  // if _potential[31:0] >= _threshold: write {_cluster_mask[15:00], _out_spike_id[31:00]} to output FIFO, reset _potential[31:00] to 0
+                                        //sgs  <_potential_id>, <_potential>, d63, d32, #1111             // _potential_id <= _potential[63:32]
+                                        rft <_potential_id>, <_potential>, d32, #1111
+                                        and2 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                                        and3 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1111
+                                        //cct  <_potential>, <_potential_id>, <_potential_v>, d31, d0, d31, d0, #1111     // _potential <= {_addr[31:0], potential_v[31:0]}
+                                        lft <_reg1_cct>, <_potential_id>, d32, #1111
+                                        and0 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                                        and1 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1111
+                                        and2 <_reg2_cct>, <_potential_v>, #0000_0000_0000_0000, #1111
+                                        and3 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #1111
+                                        add <_potential>, <_reg1_cct>, <_reg2_cct>, #1111
+                                        wbp <_addr>, <_potential>, #1111                                // write back, potential_mem[_addr] <= _potential
+                                        add <_addr>, <_addr>, #1, #1111                                 // _addr += 1
+                                        mov <cmp0>, <_addr>, #0001                                      // cmp0 <= _addr
+                                        jng <cmp0>, d432, !L4_ckf_handle                                // if cmp <= 432: continue check firing
+                                        je <spike_timestep>, <max_timestep>, !endimg                    // if spike_timestep == max_timestep: jump to endimg
+                                        jmp !L4_sync                                                    // else, synchornize for the next timestep
+L4_sync:                                add <timestep>, <timestep>, #1                                  // timestep += 1            
+                                        add <_timestep>, <_timestep>, #1, #1111                         // _timestep += 1
+                                        syn                                                             // sychronize
+                                        jmp !L4_read_timestep_init                                      // jump to L4_read_timestep_init to read the next input
+L4_handle_init:                         add <input_addr>, <input_addr>, #1                              // input_addr += 1
+                                        //sgs <col>, <spike_id>, d3, d0                                   // _col <= spike_id[4:0]
+                                        and0 <col>, <spike_id>, #0000_0000_0000_1111
+                                        and1 <col>, <col>, #0000_0000_0000_0000
+                                        and2 <col>, <col>, #0000_0000_0000_0000
+                                        and3 <col>, <col>, #0000_0000_0000_0000
+                                        //sgs <row>, <spike_id>, d7, d4                                   // _row <= spike_id[9:5]
+                                        rft <row>, <spike_id>, d4
+                                        and0 <row>, <row>, #0000_0000_0000_1111
+                                        and1 <row>, <row>, #0000_0000_0000_0000
+                                        and2 <row>, <row>, #0000_0000_0000_0000
+                                        and3 <row>, <row>, #0000_0000_0000_0000
+                                        rft <col>, <col>, #1                                            // _col <= col / 2
+                                        rft <row>, <row>, #1                                            // _row <= row / 2
+                                        //sgs <feature_map>, <spike_id>, d14, d8                           // feature_map <= spike_id[9:4]
+                                        rft <feature_map>, <spike_id>, d8
+                                        and0 <feature_map>, <feature_map>, #0000_0000_0111_1111
+                                        and1 <feature_map>, <feature_map>, #0000_0000_0000_0000
+                                        and2 <feature_map>, <feature_map>, #0000_0000_0000_0000
+                                        and3 <feature_map>, <feature_map>, #0000_0000_0000_0000
+                                        jng <feature_map>, d15, !L4_handle_PE0                          // if cmp0 <= 15: jump to !L4_handle_PE0 (this spike should be handled by PE0)
+                                        jng <feature_map>, d31, !L4_handle_PE1                          // if cmp0 <= 31: jump to !L4_handle_PE1 (this spike should be handled by PE1)
+                                        jng <feature_map>, d47, !L4_handle_PE2                          // if cmp0 <= 47: jump to !L4_handle_PE2 (this spike should be handled by PE2)
+                                        jng <feature_map>, d63, !L4_handle_PE3                          // if cmp0 <= 63: jump to !L4_handle_PE0 (this spike should be handled by PE0)
+L4_handle_PE0:                          mov <_col>, <col>, #0001                                        // _col <= col
+                                        mov <_row>, <row>, #0001                                        // _row <= row
+                                        mov <_feature_map>, <feature_map>, #0001                        // _feature_map <= feature_map
+                                        mul <_addr>, <_feature_map>, d16, #0001                         // _addr <= _feature_map * 16
+                                        mul <_row>, <_row>, d4, #0001                                   // _row <= _row * 4
+                                        add <_addr>, <_addr>, <_row>, #0001                             // _addr += _row
+                                        add <_addr>, <_addr>, <_col>, #0001                             // _addr += _col
+                                        rpm <_potential>, <_addr>, #0001                                // _potential <= potential_mem[_addr]
+                                        asgs <_potential_v>, <_potential>, d31, d0, #0001               // _potential_v <= _potential[31:0] signed extending
+                                        //sgs <_potential_id>, <_potential>, d46, d32, #0001              // _potential_id <= _potential[45:32]
+                                        rft <_potential_id>, <_potential>, d32, #0001
+                                        and0 <_potential_id>, <_potential_id>, #0111_1111_1111_1111, #0001
+                                        and1 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #0001
+                                        and2 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #0001
+                                        and3 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #0001
+                                        adds <_potential_v>, <_potential_v>, <_weight>, #0001           // _potential_v <= _potential_v + _weight
+                                        //cct  <_potential>, <_potential_id>, <_potential_v>, d16, d0, d31, d0, #0001       // _potential <= {_addr[16:0], potential_v[31:0]}
+                                        lft <_reg1_cct>, <_potential_id>, d32, #0001
+                                        and0 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #0001
+                                        and1 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #0001
+                                        and2 <_reg2_cct>, <_potential_v>, #0000_0000_0000_0000, #0001
+                                        and3 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #0001
+                                        add <_potential>, <_reg1_cct>, <_reg2_cct>, #0001
+                                        wbp <_addr>, <_potential>, #0001                                // write back, potential_mem[_addr] <= _potential
+                                        jmp !L4_input_read                                              // read the next input
+L4_handle_PE1:                          mov <_col>, <col>, #0010                                        // _col <= col
+                                        mov <_row>, <row>, #0010                                        // _row <= row
+                                        mov <_feature_map>, <feature_map>, #0010                        // _feature_map <= feature_map
+                                        sub <_feature_map>, <_feature_map>, d16, #0010                  // _feature_map -= 16
+                                        mul <_addr>, <_feature_map>, d16, #0010                         // _addr <= _feature_map * 16
+                                        mul <_row>, <_row>, d4, #0010                                   // _row <= _row * 4
+                                        add <_addr>, <_addr>, <_row>, #0010                             // _addr += _row
+                                        add <_addr>, <_addr>, <_col>, #0010                             // _addr += _col
+                                        rpm <_potential>, <_addr>, #0010                                // _potential <= potential_mem[_addr]
+                                        asgs <_potential_v>, <_potential>, d31, d0, #0010               // _potential_v <= _potential[31:0] signed extending
+                                        //sgs <_potential_id>, <_potential>, d46, d32, #0010              // _potential_id <= _potential[45:32]
+                                        rft <_potential_id>, <_potential>, d32, #0010
+                                        and0 <_potential_id>, <_potential_id>, #0111_1111_1111_1111, #0010
+                                        and1 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #0010
+                                        and2 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #0010
+                                        and3 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #0010
+                                        adds <_potential_v>, <_potential_v>, <_weight>, #0010           // _potential_v <= _potential_v + _weight
+                                        //cct  <_potential>, <_potential_id>, <_potential_v>, d16, d0, d31, d0, #0010       // _potential <= {_addr[16:0], potential_v[31:0]}
+                                        lft <_reg1_cct>, <_potential_id>, d32, #0010
+                                        and0 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #0010
+                                        and1 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #0010
+                                        and2 <_reg2_cct>, <_potential_v>, #0000_0000_0000_0000, #0010
+                                        and3 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #0010
+                                        add <_potential>, <_reg1_cct>, <_reg2_cct>, #0010
+                                        wbp <_addr>, <_potential>, #0010                                // write back, potential_mem[_addr] <= _potential
+                                        jmp !L4_input_read                                              // read the next input
+L4_handle_PE2:                          mov <_col>, <col>, #0100                                        // _col <= col
+                                        mov <_row>, <row>, #0100                                        // _row <= row
+                                        mov <_feature_map>, <feature_map>, #0100                        // _feature_map <= feature_map
+                                        sub <_feature_map>, <_feature_map>, d32, #0100                  // _feature_map -= 32
+                                        mul <_addr>, <_feature_map>, d16, #0100                         // _addr <= _feature_map * 16
+                                        mul <_row>, <_row>, d4, #0100                                   // _row <= _row * 4
+                                        add <_addr>, <_addr>, <_row>, #0100                             // _addr += _row
+                                        add <_addr>, <_addr>, <_col>, #0100                             // _addr += _col
+                                        rpm <_potential>, <_addr>, #0100                                // _potential <= potential_mem[_addr]
+                                        asgs <_potential_v>, <_potential>, d31, d0, #0100               // _potential_v <= _potential[31:0] signed extending
+                                        //sgs <_potential_id>, <_potential>, d46, d32, #0100              // _potential_id <= _potential[45:32]
+                                        rft <_potential_id>, <_potential>, d32, #0100
+                                        and0 <_potential_id>, <_potential_id>, #0111_1111_1111_1111, #0100
+                                        and1 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #0100
+                                        and2 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #0100
+                                        and3 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #0100
+                                        adds <_potential_v>, <_potential_v>, <_weight>, #0100           // _potential_v <= _potential_v + _weight
+                                        //cct  <_potential>, <_potential_id>, <_potential_v>, d16, d0, d31, d0, #0100       // _potential <= {_addr[16:0], potential_v[31:0]}
+                                        lft <_reg1_cct>, <_potential_id>, d32, #0100
+                                        and0 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #0100
+                                        and1 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #0100
+                                        and2 <_reg2_cct>, <_potential_v>, #0000_0000_0000_0000, #0100
+                                        and3 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #0100
+                                        add <_potential>, <_reg1_cct>, <_reg2_cct>, #0100
+                                        wbp <_addr>, <_potential>, #0100                                // write back, potential_mem[_addr] <= _potential
+                                        jmp !L4_input_read                                              // read the next input
+L4_handle_PE3:                          mov <_col>, <col>, #1000                                        // _col <= col
+                                        mov <_row>, <row>, #1000                                        // _row <= row
+                                        mov <_feature_map>, <feature_map>, #1000                        // _feature_map <= feature_map
+                                        sub <_feature_map>, <_feature_map>, d48, #1000                  // _feature_map -= 48
+                                        mul <_addr>, <_feature_map>, d16, #1000                         // _addr <= _feature_map * 16
+                                        mul <_row>, <_row>, d4, #1000                                   // _row <= _row * 4
+                                        add <_addr>, <_addr>, <_row>, #1000                             // _addr += _row
+                                        add <_addr>, <_addr>, <_col>, #1000                             // _addr += _col
+                                        rpm <_potential>, <_addr>, #1000                                // _potential <= potential_mem[_addr]
+                                        asgs <_potential_v>, <_potential>, d31, d0, #1000               // _potential_v <= _potential[31:0] signed extending
+                                        //sgs <_potential_id>, <_potential>, d46, d32, #1000              // _potential_id <= _potential[45:32]
+                                        rft <_potential_id>, <_potential>, d32, #1000
+                                        and0 <_potential_id>, <_potential_id>, #0111_1111_1111_1111, #1000
+                                        and1 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1000
+                                        and2 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1000
+                                        and3 <_potential_id>, <_potential_id>, #0000_0000_0000_0000, #1000
+                                        adds <_potential_v>, <_potential_v>, <_weight>, #1000           // _potential_v <= _potential_v + _weight
+                                        //cct  <_potential>, <_potential_id>, <_potential_v>, d16, d0, d31, d0, #1000       // _potential <= {_addr[16:0], potential_v[31:0]}
+                                        lft <_reg1_cct>, <_potential_id>, d32, #1000
+                                        and0 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1000
+                                        and1 <_reg1_cct>, <_reg1_cct>, #0000_0000_0000_0000, #1000
+                                        and2 <_reg2_cct>, <_potential_v>, #0000_0000_0000_0000, #1000
+                                        and3 <_reg2_cct>, <_reg2_cct>, #0000_0000_0000_0000, #1000
+                                        add <_potential>, <_reg1_cct>, <_reg2_cct>, #1000
+                                        wbp <_addr>, <_potential>, #1000                                // write back, potential_mem[_addr] <= _potential
+                                        jmp !L4_input_read                                              // read the next input
+endimg:                                 done
